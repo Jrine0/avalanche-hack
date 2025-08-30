@@ -118,6 +118,13 @@ The frontend will run on `http://localhost:3000`
 4. **Backend calls smart contract** → Processes payment
 5. **Transaction recorded** → Snowtrace + backend storage
 
+## Recent Contract Improvements
+
+The smart contracts were recently updated to fix several critical security and logic issues.
+
+*   **Corrected Fee Calculation**: Fixed a bug where platform fees were being charged twice (once on deposit, and again on payout). The fee is now correctly charged only once when a task is funded.
+*   **Removed Owner Backdoor**: Removed a critical vulnerability that allowed the contract owner to bypass the `Rewarder` contract and unilaterally process payouts. All payouts must now go through the intended Merkle proof verification process.
+
 ## 📖 Contract Documentation
 
 ### Rewarder Contract

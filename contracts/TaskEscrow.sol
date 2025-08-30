@@ -133,12 +133,13 @@ contract TaskEscrow is ReentrancyGuard, Ownable {
 
         // Calculate platform fee
         platformFee = (actualAmount * platformFeeBps) / 10000;
+        uint256 netAmount = actualAmount - platformFee;
 
         // Create or update escrow
         escrows[taskId] = EscrowInfo({
             creator: msg.sender,
             fundingToken: fundingToken,
-            totalFunded: actualAmount,
+            totalFunded: netAmount,
             totalPaidOut: 0,
             platformFeesCollected: platformFee,
             isActive: true,
@@ -172,7 +173,7 @@ contract TaskEscrow is ReentrancyGuard, Ownable {
         uint256 amount,
         address rewardToken
     ) external nonReentrant {
-        require(msg.sender == address(rewarder) || msg.sender == owner(), "Only rewarder or owner can call this");
+        require(msg.sender == address(rewarder), "Only rewarder can call this");
         
         EscrowInfo storage escrow = escrows[taskId];
         if (escrow.creator == address(0)) revert EscrowNotFound();
@@ -184,32 +185,17 @@ contract TaskEscrow is ReentrancyGuard, Ownable {
         // Update escrow state
         escrow.totalPaidOut += amount;
 
-        // Calculate platform fee for this payout
-        uint256 platformFee = (amount * platformFeeBps) / 10000;
-        uint256 netPayout = amount - platformFee;
-
         // Transfer payout to user
         if (rewardToken == address(0)) {
             // AVAX payout
-            (bool success, ) = user.call{value: netPayout}("");
+            (bool success, ) = user.call{value: amount}("");
             require(success, "AVAX payout failed");
         } else {
             // ERC20 payout
-            IERC20(rewardToken).safeTransfer(user, netPayout);
+            IERC20(rewardToken).safeTransfer(user, amount);
         }
 
-        // Transfer platform fee
-        if (platformFee > 0) {
-            if (rewardToken == address(0)) {
-                (bool success, ) = platformFeeRecipient.call{value: platformFee}("");
-                require(success, "Platform fee transfer failed");
-            } else {
-                IERC20(rewardToken).safeTransfer(platformFeeRecipient, platformFee);
-            }
-            escrow.platformFeesCollected += platformFee;
-        }
-
-        emit PayoutProcessed(taskId, user, amount, rewardToken, platformFee);
+        emit PayoutProcessed(taskId, user, amount, rewardToken, 0);
     }
 
     /**
