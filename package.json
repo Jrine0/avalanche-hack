@@ -1,0 +1,47 @@
+{
+  "name": "avalanche-micro-task-contracts",
+  "version": "1.0.0",
+  "description": "Smart contracts for Avalanche-based micro-task rewards platform",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:fuji": "hardhat run scripts/deploy.js --network fuji",
+    "verify": "hardhat verify",
+    "coverage": "hardhat coverage",
+    "dev": "node backend/server.js",
+    "start": "node backend/server.js",
+    "build:frontend": "cd frontend && npm run build",
+    "install:frontend": "cd frontend && npm install"
+  },
+  "keywords": [
+    "solidity",
+    "hardhat",
+    "avalanche",
+    "smart-contracts",
+    "web3",
+    "micro-tasks"
+  ],
+  "author": "Smart Contracts Lead",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "@openzeppelin/contracts": "^4.9.3",
+    "@openzeppelin/merkle-tree": "^1.0.0",
+    "@openzeppelin/test-helpers": "^0.5.16",
+    "hardhat": "^2.19.0",
+    "hardhat-deploy": "^0.12.0",
+    "hardhat-gas-reporter": "^1.0.9",
+    "solidity-coverage": "^0.8.5"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "axios": "^1.6.0",
+    "ethers": "^6.8.1",
+    "uuid": "^9.0.1"
+  }
+}
