@@ -1,13 +1,13 @@
 Microtask Platform Backend
 Project Title: Web-3 FeedBack
 Overview
-This is the backend for a robust microtask platform. It's built to handle user management, task creation, submission handling, and a reward system. The platform is designed to be scalable and secure, with features like AI-powered verification and blockchain integration.
+This is the backend for a robust microtask platform. It's built to handle user management, task creation, submission handling, and a reward system.
 🚀 Features
 User Management: Secure user registration, login (JWT-based), role-based access control, and user profiles.
 Task Lifecycle: Full CRUD operations for tasks (create, read, update, delete), with statuses like open, claimed, and completed.
 Submission & Review: Users can submit their work, which is then handled by a review and feedback system.
 Reward System: Points-based rewards for completing tasks and achievements.
-Advanced Integrations: Includes an AI verification system for submissions and a foundation for blockchain integration.
+Future Integrations: Includes an AI verification system for submissions and a foundation for blockchain integration.
 File Management: Supports file uploads for user avatars, task attachments, and submission files.
 Admin Panel: Comprehensive tools for managing users, tasks, and submissions.
 🛠️ Technologies Used
