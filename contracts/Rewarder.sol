@@ -15,6 +15,9 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 contract Rewarder is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
+    // Global minimum payout amount (0.01 AVAX to avoid network fee issues)
+    uint256 public constant GLOBAL_MIN_PAYOUT = 0.01 ether;
+
     // Struct to represent a reward claim
     struct RewardClaim {
         address user;
@@ -113,9 +116,12 @@ contract Rewarder is ReentrancyGuard, Ownable {
         if (block.timestamp > task.deadline) revert TaskExpired();
         if (claimed[taskId][user]) revert AlreadyClaimed();
         if (amount == 0) revert InvalidAmount();
+        
+        // Enforce global minimum for AVAX rewards only
+        if (task.rewardToken == address(0) && amount < GLOBAL_MIN_PAYOUT) revert InvalidAmount();
 
         // Verify Merkle proof
-        bytes32 leaf = keccak256(abi.encodePacked(user, amount));
+        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(user, amount))));
         if (!_verifyMerkleProof(merkleProof, merkleRoots[taskId], leaf)) {
             revert InvalidMerkleProof();
         }
@@ -158,7 +164,7 @@ contract Rewarder is ReentrancyGuard, Ownable {
             if (claim.amount == 0) continue; // Skip if amount is 0
 
             // Verify Merkle proof
-            bytes32 leaf = keccak256(abi.encodePacked(claim.user, claim.amount));
+            bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(claim.user, claim.amount))));
             if (!_verifyMerkleProof(claim.merkleProof, merkleRoots[taskId], leaf)) {
                 continue; // Skip invalid proof
             }

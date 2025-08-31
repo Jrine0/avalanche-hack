@@ -88,11 +88,11 @@ describe("TaskEscrow", function () {
             expect(escrowInfo.minPayoutAmount).to.equal(MIN_PAYOUT_AMOUNT);
 
             // Check platform fee was deducted
-            const platformFee = (FUNDING_AMOUNT * PLATFORM_FEE_BPS) / 10000;
+            const platformFee = (FUNDING_AMOUNT * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000);
             const finalBalance = await ethers.provider.getBalance(creator.address);
             const platformFinalBalance = await ethers.provider.getBalance(platform.address);
             
-            expect(initialBalance - finalBalance).to.be.gt(BigInt(FUNDING_AMOUNT));
+            expect(initialBalance - finalBalance).to.be.gt(FUNDING_AMOUNT);
             expect(platformFinalBalance - platformInitialBalance).to.equal(platformFee);
         });
 
@@ -118,16 +118,17 @@ describe("TaskEscrow", function () {
             expect(escrowInfo.totalFunded).to.equal(ethers.parseUnits("100", 6));
 
             // Check platform fee was deducted
-            const platformFee = (ethers.parseUnits("100", 6) * PLATFORM_FEE_BPS) / 10000;
+            const fundingAmount = ethers.parseUnits("100", 6);
+            const platformFee = (fundingAmount * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000);
             const finalBalance = await mockUSDC.balanceOf(creator.address);
             const platformFinalBalance = await mockUSDC.balanceOf(platform.address);
             
-            expect(initialBalance - finalBalance).to.equal(BigInt(ethers.parseUnits("100", 6)));
+            expect(initialBalance - finalBalance).to.equal(fundingAmount);
             expect(platformFinalBalance - platformInitialBalance).to.equal(platformFee);
         });
 
         it("Should emit TaskFunded event", async function () {
-            const platformFee = (FUNDING_AMOUNT * PLATFORM_FEE_BPS) / 10000;
+            const platformFee = (FUNDING_AMOUNT * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000);
 
             await expect(taskEscrow.connect(creator).fundTask(
                 taskId,
@@ -242,12 +243,13 @@ describe("TaskEscrow", function () {
             expect(finalBalance).to.be.gt(initialBalance);
             
             // Check platform fee
-            const platformFee = (payoutAmount * PLATFORM_FEE_BPS) / 10000;
+            const platformFee = (payoutAmount * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000);
             expect(platformFinalBalance - platformInitialBalance).to.equal(platformFee);
 
-            // Check escrow state
+            // Check escrow state (we now track net payouts)
             const escrowInfo = await taskEscrow.getEscrowInfo(taskId);
-            expect(escrowInfo.totalPaidOut).to.equal(payoutAmount);
+            const netPayout = payoutAmount - platformFee;
+            expect(escrowInfo.totalPaidOut).to.equal(netPayout);
         });
 
         it("Should process USDC payout", async function () {
@@ -280,13 +282,13 @@ describe("TaskEscrow", function () {
             expect(finalBalance).to.be.gt(initialBalance);
             
             // Check platform fee
-            const platformFee = (payoutAmount * PLATFORM_FEE_BPS) / 10000;
+            const platformFee = (payoutAmount * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000);
             expect(platformFinalBalance - platformInitialBalance).to.equal(platformFee);
         });
 
         it("Should emit PayoutProcessed event", async function () {
             const payoutAmount = ethers.parseEther("0.1");
-            const platformFee = (payoutAmount * PLATFORM_FEE_BPS) / 10000;
+            const platformFee = (payoutAmount * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000);
 
             await expect(taskEscrow.connect(owner).processPayout(
                 taskId,
@@ -312,7 +314,7 @@ describe("TaskEscrow", function () {
             const invalidTaskId = ethers.keccak256(ethers.toUtf8Bytes("invalid-task"));
 
             await expect(
-                taskEscrow.connect(rewarder).processPayout(
+                taskEscrow.connect(owner).processPayout(
                     invalidTaskId,
                     user1.address,
                     ethers.parseEther("0.1"),
@@ -322,10 +324,12 @@ describe("TaskEscrow", function () {
         });
 
         it("Should revert if escrow not active", async function () {
+            // Move past deadline first, then refund to make escrow inactive
+            await time.increase(86401);
             await taskEscrow.connect(creator).refundRemainingFunds(taskId);
 
             await expect(
-                taskEscrow.connect(rewarder).processPayout(
+                taskEscrow.connect(owner).processPayout(
                     taskId,
                     user1.address,
                     ethers.parseEther("0.1"),
@@ -338,7 +342,7 @@ describe("TaskEscrow", function () {
             await time.increase(86401); // Move past deadline
 
             await expect(
-                taskEscrow.connect(rewarder).processPayout(
+                taskEscrow.connect(owner).processPayout(
                     taskId,
                     user1.address,
                     ethers.parseEther("0.1"),
@@ -349,7 +353,7 @@ describe("TaskEscrow", function () {
 
         it("Should revert if amount is less than min payout", async function () {
             await expect(
-                taskEscrow.connect(rewarder).processPayout(
+                taskEscrow.connect(owner).processPayout(
                     taskId,
                     user1.address,
                     ethers.parseEther("0.005"), // Less than MIN_PAYOUT_AMOUNT
@@ -360,7 +364,7 @@ describe("TaskEscrow", function () {
 
         it("Should revert if insufficient funds", async function () {
             await expect(
-                taskEscrow.connect(rewarder).processPayout(
+                taskEscrow.connect(owner).processPayout(
                     taskId,
                     user1.address,
                     ethers.parseEther("2"), // More than funded amount
@@ -422,9 +426,12 @@ describe("TaskEscrow", function () {
         it("Should emit RefundProcessed event", async function () {
             await time.increase(86401); // Move past deadline
 
+            // Calculate expected refund amount (after platform fee)
+            const expectedRefund = FUNDING_AMOUNT - (FUNDING_AMOUNT * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000);
+
             await expect(taskEscrow.connect(creator).refundRemainingFunds(taskId))
                 .to.emit(taskEscrow, "RefundProcessed")
-                .withArgs(taskId, creator.address, FUNDING_AMOUNT, ethers.ZeroAddress);
+                .withArgs(taskId, creator.address, expectedRefund, ethers.ZeroAddress);
         });
 
         it("Should revert if not creator", async function () {
@@ -450,11 +457,17 @@ describe("TaskEscrow", function () {
         });
 
         it("Should revert if no funds to refund", async function () {
-            // Process a payout to use all funds
+            // Process a payout to use all available funds
+            // Available funds = total - initial platform fee
+            const availableFunds = FUNDING_AMOUNT - (FUNDING_AMOUNT * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000);
+            
+            // We'll pay out slightly less than the max to ensure we can cover the platform fee
+            const payoutGross = availableFunds; // This should work since we track net payouts now
+            
             await taskEscrow.connect(owner).processPayout(
                 taskId,
                 user1.address,
-                FUNDING_AMOUNT,
+                payoutGross,
                 ethers.ZeroAddress
             );
 
@@ -536,18 +549,24 @@ describe("TaskEscrow", function () {
         });
 
         it("Should return correct remaining funds", async function () {
-            expect(await taskEscrow.getRemainingFunds(taskId)).to.equal(FUNDING_AMOUNT);
+            // Should return amount after platform fee deduction
+            const expectedAfterFee = FUNDING_AMOUNT - (FUNDING_AMOUNT * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000);
+            expect(await taskEscrow.getRemainingFunds(taskId)).to.equal(expectedAfterFee);
 
-            // After a payout
+            // After a payout (we now track net payouts)
+            const payoutGross = ethers.parseEther("0.1");
+            const payoutPlatformFee = (payoutGross * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000);
+            const payoutNet = payoutGross - payoutPlatformFee;
+
             await taskEscrow.connect(owner).processPayout(
                 taskId,
                 user1.address,
-                ethers.parseEther("0.1"),
+                payoutGross,
                 ethers.ZeroAddress
             );
 
             expect(await taskEscrow.getRemainingFunds(taskId)).to.equal(
-                FUNDING_AMOUNT - ethers.parseEther("0.1")
+                FUNDING_AMOUNT - (FUNDING_AMOUNT * BigInt(PLATFORM_FEE_BPS)) / BigInt(10000) - payoutNet - payoutPlatformFee
             );
         });
 

@@ -24,6 +24,9 @@ contract TaskEscrow is ReentrancyGuard, Ownable {
     
     // Platform fee recipient
     address public platformFeeRecipient;
+    
+    // Global minimum payout amount (0.01 AVAX) to avoid network fee issues
+    uint256 public constant GLOBAL_MIN_PAYOUT = 0.01 ether;
 
     // Struct to store escrow information
     struct EscrowInfo {
@@ -116,6 +119,15 @@ contract TaskEscrow is ReentrancyGuard, Ownable {
         require(deadline > block.timestamp, "Deadline must be in the future");
         require(amount > 0, "Amount must be greater than 0");
         require(minPayoutAmount > 0, "Min payout amount must be greater than 0");
+        
+        // Enforce minimum payout based on token type
+        if (fundingToken == address(0)) {
+            // For AVAX, enforce 0.01 AVAX minimum
+            require(minPayoutAmount >= GLOBAL_MIN_PAYOUT, "Min payout amount must be at least 0.01 AVAX");
+        } else {
+            // For ERC20 tokens like USDC (6 decimals), allow smaller minimum amounts
+            // The minimum is context-dependent for different tokens
+        }
 
         uint256 actualAmount;
         uint256 platformFee;
@@ -179,14 +191,20 @@ contract TaskEscrow is ReentrancyGuard, Ownable {
         if (!escrow.isActive) revert EscrowNotActive();
         if (block.timestamp > escrow.deadline) revert EscrowExpired();
         if (amount < escrow.minPayoutAmount) revert InvalidAmount();
-        if (amount > (escrow.totalFunded - escrow.totalPaidOut)) revert InsufficientFunds();
-
-        // Update escrow state
-        escrow.totalPaidOut += amount;
-
-        // Calculate platform fee for this payout
+        
+        // Enforce global minimum for AVAX payouts only
+        if (rewardToken == address(0) && amount < GLOBAL_MIN_PAYOUT) revert InvalidAmount();
+        
+        // Check available funds
+        uint256 totalUsed = escrow.platformFeesCollected + escrow.totalPaidOut;
         uint256 platformFee = (amount * platformFeeBps) / 10000;
         uint256 netPayout = amount - platformFee;
+        
+        // Ensure we have enough funds to cover both the net payout and platform fee
+        if (escrow.totalFunded < totalUsed + netPayout + platformFee) revert InsufficientFunds();
+
+        // Update escrow state (we track net payouts, not gross)
+        escrow.totalPaidOut += netPayout;
 
         // Transfer payout to user
         if (rewardToken == address(0)) {
@@ -223,8 +241,10 @@ contract TaskEscrow is ReentrancyGuard, Ownable {
         if (msg.sender != escrow.creator) revert UnauthorizedCreator();
         if (block.timestamp <= escrow.deadline) revert EscrowNotActive();
 
-        uint256 remainingAmount = escrow.totalFunded - escrow.totalPaidOut;
-        require(remainingAmount > 0, "No funds to refund");
+        // Calculate remaining amount
+        uint256 totalUsed = escrow.platformFeesCollected + escrow.totalPaidOut;
+        require(escrow.totalFunded > totalUsed, "No funds to refund");
+        uint256 remainingAmount = escrow.totalFunded - totalUsed;
 
         // Mark escrow as inactive
         escrow.isActive = false;
@@ -281,7 +301,9 @@ contract TaskEscrow is ReentrancyGuard, Ownable {
     function getRemainingFunds(bytes32 taskId) external view returns (uint256) {
         EscrowInfo storage escrow = escrows[taskId];
         if (escrow.creator == address(0)) return 0;
-        return escrow.totalFunded - escrow.totalPaidOut;
+        uint256 totalUsed = escrow.platformFeesCollected + escrow.totalPaidOut;
+        if (escrow.totalFunded <= totalUsed) return 0;
+        return escrow.totalFunded - totalUsed;
     }
 
     /**

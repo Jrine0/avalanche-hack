@@ -6,7 +6,7 @@ describe("Rewarder", function () {
     let rewarder;
     let mockUSDC;
     let owner, platform, creator, user1, user2, user3;
-    let taskId, merkleRoot;
+    let taskId, merkleRoot, merkleTree;
     let deadline;
 
     // Test data
@@ -38,8 +38,8 @@ describe("Rewarder", function () {
 
         // Generate proper Merkle tree
         const { StandardMerkleTree } = require('@openzeppelin/merkle-tree');
-        const tree = StandardMerkleTree.of(rewards, ["address", "uint256"]);
-        merkleRoot = tree.root;
+        merkleTree = StandardMerkleTree.of(rewards, ["address", "uint256"]);
+        merkleRoot = merkleTree.root;
     });
 
     describe("Deployment", function () {
@@ -158,15 +158,8 @@ describe("Rewarder", function () {
         it("Should claim AVAX reward with valid proof", async function () {
             const initialBalance = await ethers.provider.getBalance(user1.address);
             
-            // Generate proper Merkle tree and proof
-            const rewards = [
-                [user1.address, REWARD_AMOUNT_1],
-                [user2.address, REWARD_AMOUNT_2],
-                [user3.address, REWARD_AMOUNT_3]
-            ];
-            const { StandardMerkleTree } = require('@openzeppelin/merkle-tree');
-            const tree = StandardMerkleTree.of(rewards, ["address", "uint256"]);
-            const proof = tree.getProof(0); // Proof for user1
+            // Get proof for user1 (first entry in the tree)
+            const proof = merkleTree.getProof(0);
 
             await rewarder.connect(user1).claimReward(
                 taskId,
@@ -181,13 +174,24 @@ describe("Rewarder", function () {
         });
 
         it("Should claim USDC reward with valid proof", async function () {
+            // Create USDC-specific amounts (using 6 decimals)
+            const usdcRewards = [
+                [user1.address, ethers.parseUnits("10", 6)], // 10 USDC
+                [user2.address, ethers.parseUnits("5", 6)],  // 5 USDC  
+                [user3.address, ethers.parseUnits("7.5", 6)] // 7.5 USDC
+            ];
+            
+            const { StandardMerkleTree } = require('@openzeppelin/merkle-tree');
+            const usdcTree = StandardMerkleTree.of(usdcRewards, ["address", "uint256"]);
+            const usdcRoot = usdcTree.root;
+            
             // Fund contract with USDC
             await mockUSDC.mint(rewarder.target, ethers.parseUnits("100", 6));
 
-            // Set Merkle root for USDC
+            // Set Merkle root for USDC  
             await rewarder.setMerkleRoot(
                 taskId,
-                merkleRoot,
+                usdcRoot,
                 mockUSDC.target,
                 ethers.parseUnits("100", 6),
                 deadline
@@ -195,33 +199,27 @@ describe("Rewarder", function () {
 
             const initialBalance = await mockUSDC.balanceOf(user1.address);
             
-            // Generate proper Merkle tree and proof
-            const rewards = [
-                [user1.address, REWARD_AMOUNT_1],
-                [user2.address, REWARD_AMOUNT_2],
-                [user3.address, REWARD_AMOUNT_3]
-            ];
-            const { StandardMerkleTree } = require('@openzeppelin/merkle-tree');
-            const tree = StandardMerkleTree.of(rewards, ["address", "uint256"]);
-            const proof = tree.getProof(0); // Proof for user1
+            // Get proof for user1 (first entry in the USDC tree)
+            const proof = usdcTree.getProof(0);
 
             await rewarder.connect(user1).claimReward(
                 taskId,
                 user1.address,
-                REWARD_AMOUNT_1,
+                ethers.parseUnits("10", 6), // 10 USDC
                 proof
             );
 
             const finalBalance = await mockUSDC.balanceOf(user1.address);
             expect(finalBalance).to.be.gt(initialBalance);
+            expect(await rewarder.hasClaimed(taskId, user1.address)).to.be.true;
         });
 
         it("Should emit RewardClaimed event", async function () {
-            const leaf = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "uint256"],
-                [user1.address, REWARD_AMOUNT_1]
-            ));
-            const proof = [leaf];
+        });
+
+        it("Should emit RewardClaimed event", async function () {
+            // Get proof for user1 (first entry in the tree)
+            const proof = merkleTree.getProof(0);
 
             await expect(rewarder.connect(user1).claimReward(
                 taskId,
@@ -233,11 +231,8 @@ describe("Rewarder", function () {
         });
 
         it("Should revert if already claimed", async function () {
-            const leaf = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "uint256"],
-                [user1.address, REWARD_AMOUNT_1]
-            ));
-            const proof = [leaf];
+            // Get proof for user1 (first entry in the tree)
+            const proof = merkleTree.getProof(0);
 
             await rewarder.connect(user1).claimReward(
                 taskId,
@@ -259,11 +254,8 @@ describe("Rewarder", function () {
         it("Should revert if task is not active", async function () {
             await rewarder.deactivateTask(taskId);
 
-            const leaf = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "uint256"],
-                [user1.address, REWARD_AMOUNT_1]
-            ));
-            const proof = [leaf];
+            // Get proof for user1 (first entry in the tree)
+            const proof = merkleTree.getProof(0);
 
             await expect(
                 rewarder.connect(user1).claimReward(
@@ -278,11 +270,8 @@ describe("Rewarder", function () {
         it("Should revert if task is expired", async function () {
             await time.increase(86401); // Move past deadline
 
-            const leaf = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "uint256"],
-                [user1.address, REWARD_AMOUNT_1]
-            ));
-            const proof = [leaf];
+            // Get proof for user1 (first entry in the tree)
+            const proof = merkleTree.getProof(0);
 
             await expect(
                 rewarder.connect(user1).claimReward(
@@ -295,18 +284,29 @@ describe("Rewarder", function () {
         });
 
         it("Should revert if amount is zero", async function () {
-            const leaf = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "uint256"],
-                [user1.address, 0]
-            ));
-            const proof = [leaf];
+            // Create a merkle tree with zero amount for testing
+            const testRewards = [[user1.address, ethers.parseEther("0")]];
+            const { StandardMerkleTree } = require('@openzeppelin/merkle-tree');
+            const testTree = StandardMerkleTree.of(testRewards, ["address", "uint256"]);
+            const testRoot = testTree.root;
+            const testProof = testTree.getProof(0);
+
+            // Set merkle root for zero amount test
+            const testTaskId = ethers.keccak256(ethers.toUtf8Bytes("test-task-zero"));
+            await rewarder.setMerkleRoot(
+                testTaskId,
+                testRoot,
+                ethers.ZeroAddress,
+                ethers.parseEther("1"),
+                deadline
+            );
 
             await expect(
                 rewarder.connect(user1).claimReward(
-                    taskId,
+                    testTaskId,
                     user1.address,
                     0,
-                    proof
+                    testProof
                 )
             ).to.be.revertedWithCustomError(rewarder, "InvalidAmount");
         });
@@ -371,11 +371,8 @@ describe("Rewarder", function () {
         });
 
         it("Should skip already claimed rewards", async function () {
-            const leaf = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "uint256"],
-                [user1.address, REWARD_AMOUNT_1]
-            ));
-            const proof = [leaf];
+            // Get proof for user1 (first entry in the tree)
+            const proof = merkleTree.getProof(0);
 
             // First claim
             await rewarder.connect(user1).claimReward(
@@ -390,21 +387,18 @@ describe("Rewarder", function () {
                 {
                     user: user1.address,
                     amount: REWARD_AMOUNT_1,
-                    merkleProof: proof
+                    merkleProof: merkleTree.getProof(0)
                 },
                 {
                     user: user2.address,
                     amount: REWARD_AMOUNT_2,
-                    merkleProof: [ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-                        ["address", "uint256"],
-                        [user2.address, REWARD_AMOUNT_2]
-                    ))]
+                    merkleProof: merkleTree.getProof(1)
                 }
             ];
 
             await rewarder.batchClaimRewards(taskId, claims);
 
-            // user2 should still be able to claim
+            expect(await rewarder.hasClaimed(taskId, user1.address)).to.be.true;
             expect(await rewarder.hasClaimed(taskId, user2.address)).to.be.true;
         });
     });
@@ -442,6 +436,12 @@ describe("Rewarder", function () {
 
     describe("View functions", function () {
         beforeEach(async function () {
+            // Fund the contract with AVAX
+            await owner.sendTransaction({
+                to: rewarder.target,
+                value: ethers.parseEther("1")
+            });
+
             await rewarder.setMerkleRoot(
                 taskId,
                 merkleRoot,
@@ -465,15 +465,8 @@ describe("Rewarder", function () {
         });
 
         it("Should return true for claimed address", async function () {
-            // Generate proper Merkle tree and proof
-            const rewards = [
-                [user1.address, REWARD_AMOUNT_1],
-                [user2.address, REWARD_AMOUNT_2],
-                [user3.address, REWARD_AMOUNT_3]
-            ];
-            const { StandardMerkleTree } = require('@openzeppelin/merkle-tree');
-            const tree = StandardMerkleTree.of(rewards, ["address", "uint256"]);
-            const proof = tree.getProof(0); // Proof for user1
+            // Get proof for user1 (first entry in the tree)
+            const proof = merkleTree.getProof(0);
 
             await rewarder.connect(user1).claimReward(
                 taskId,
