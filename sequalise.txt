@@ -1,0 +1,289 @@
+-- Enhanced Users Table
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(150) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role VARCHAR(20) CHECK (role IN ('creator','worker','admin')) DEFAULT 'worker',
+    wallet_address VARCHAR(42) UNIQUE, -- Ethereum-style address (0x...)
+    wallet_connected BOOLEAN DEFAULT FALSE,
+    profile_image_url TEXT,
+    bio TEXT,
+    total_earned NUMERIC(12,6) DEFAULT 0, -- Track lifetime earnings
+    total_tasks_completed INTEGER DEFAULT 0,
+    total_tasks_created INTEGER DEFAULT 0,
+    reputation_score NUMERIC(5,2) DEFAULT 0, -- 0-100 reputation system
+    is_verified BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+    last_login TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Enhanced Tasks Table
+CREATE TABLE tasks (
+    id SERIAL PRIMARY KEY,
+    creator_id INT REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    instructions TEXT, -- Detailed task instructions
+    reward NUMERIC(12,6) NOT NULL, -- Support micro-payments
+    reward_currency VARCHAR(20) DEFAULT 'AVAX',
+    difficulty_level VARCHAR(20) CHECK (difficulty_level IN ('easy','medium','hard')) DEFAULT 'easy',
+    estimated_time INTEGER, -- in minutes
+    max_submissions INTEGER DEFAULT 1, -- How many workers can complete this
+    current_submissions INTEGER DEFAULT 0,
+    status VARCHAR(20) CHECK (status IN ('draft','open','in_progress','completed','expired','cancelled')) DEFAULT 'draft',
+    priority VARCHAR(20) CHECK (priority IN ('low','medium','high','urgent')) DEFAULT 'medium',
+    deadline TIMESTAMP,
+    auto_approve BOOLEAN DEFAULT FALSE, -- Auto-approve based on AI score threshold
+    min_ai_score NUMERIC(5,2) DEFAULT 70, -- Minimum AI verification score
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
+-- Enhanced Task Submissions Table
+CREATE TABLE task_submissions (
+    id SERIAL PRIMARY KEY,
+    task_id INT REFERENCES tasks(id) ON DELETE CASCADE,
+    worker_id INT REFERENCES users(id) ON DELETE CASCADE,
+    submission_data JSONB, -- Flexible storage for different submission types
+    submission_url TEXT, -- proof link (Google Drive, IPFS, Turf data)
+    submission_text TEXT, -- For text-based submissions
+    submission_metadata JSONB, -- Additional metadata (file sizes, formats, etc.)
+    ai_verification_score NUMERIC(5,2), -- score from Turf AI / ICM model
+    ai_feedback TEXT, -- AI-generated feedback
+    manual_review_required BOOLEAN DEFAULT FALSE,
+    reviewer_id INT REFERENCES users(id), -- Manual reviewer if needed
+    reviewer_comments TEXT,
+    status VARCHAR(20) CHECK (status IN ('pending','under_review','approved','rejected','disputed')) DEFAULT 'pending',
+    rejection_reason TEXT,
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(task_id, worker_id) -- Prevent duplicate submissions per user/task
+);
+
+-- Enhanced Transactions Table
+CREATE TABLE transactions (
+    id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    task_id INT REFERENCES tasks(id) ON DELETE SET NULL,
+    submission_id INT REFERENCES task_submissions(id) ON DELETE SET NULL,
+    transaction_type VARCHAR(30) CHECK (transaction_type IN ('task_payment','task_creation_fee','platform_fee','withdrawal','deposit','refund')),
+    txn_hash VARCHAR(66), -- Avalanche tx hash (0x + 64 chars)
+    amount NUMERIC(12,6) NOT NULL,
+    currency VARCHAR(20) DEFAULT 'AVAX',
+    gas_used NUMERIC(12,6),
+    gas_price NUMERIC(12,6),
+    from_address VARCHAR(42),
+    to_address VARCHAR(42),
+    block_number BIGINT,
+    confirmation_count INTEGER DEFAULT 0,
+    status VARCHAR(20) CHECK (status IN ('pending','confirming','success','failed','cancelled')) DEFAULT 'pending',
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at TIMESTAMP
+);
+
+-- Enhanced AI Agent Logs Table
+CREATE TABLE ai_agent_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    task_id INT REFERENCES tasks(id) ON DELETE CASCADE,
+    submission_id INT REFERENCES task_submissions(id) ON DELETE CASCADE,
+    ai_action VARCHAR(100), -- e.g. "verified_submission", "recommended_task", "fraud_detection"
+    confidence_score NUMERIC(5,2),
+    raw_request JSONB, -- Input sent to AI
+    raw_response JSONB, -- Full AI response
+    processing_time INTEGER, -- milliseconds
+    model_version VARCHAR(50), -- Track AI model versions
+    success BOOLEAN DEFAULT TRUE,
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Categories/Skills Tables (Enhanced)
+CREATE TABLE categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) UNIQUE NOT NULL,
+    description TEXT,
+    icon_url TEXT,
+    color_hex VARCHAR(7), -- #FFFFFF format
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE skills (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) UNIQUE NOT NULL,
+    category_id INT REFERENCES categories(id),
+    description TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE user_skills (
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    skill_id INT REFERENCES skills(id) ON DELETE CASCADE,
+    proficiency_level VARCHAR(20) CHECK (proficiency_level IN ('beginner','intermediate','advanced','expert')) DEFAULT 'beginner',
+    verified BOOLEAN DEFAULT FALSE,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, skill_id)
+);
+
+CREATE TABLE task_skills (
+    task_id INT REFERENCES tasks(id) ON DELETE CASCADE,
+    skill_id INT REFERENCES skills(id) ON DELETE CASCADE,
+    required_level VARCHAR(20) CHECK (required_level IN ('beginner','intermediate','advanced','expert')) DEFAULT 'beginner',
+    PRIMARY KEY (task_id, skill_id)
+);
+
+-- New Tables for Platform Features
+
+-- Notifications Table
+CREATE TABLE notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL, -- 'task_assigned', 'payment_received', 'submission_approved', etc.
+    title VARCHAR(200) NOT NULL,
+    message TEXT NOT NULL,
+    data JSONB, -- Additional notification data
+    is_read BOOLEAN DEFAULT FALSE,
+    action_url TEXT, -- Where to redirect when clicked
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    read_at TIMESTAMP
+);
+
+-- Task Reviews/Ratings Table
+CREATE TABLE task_reviews (
+    id SERIAL PRIMARY KEY,
+    task_id INT REFERENCES tasks(id) ON DELETE CASCADE,
+    reviewer_id INT REFERENCES users(id) ON DELETE CASCADE,
+    reviewee_id INT REFERENCES users(id) ON DELETE CASCADE, -- Who is being reviewed
+    rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+    review_text TEXT,
+    review_type VARCHAR(20) CHECK (review_type IN ('creator_to_worker','worker_to_creator')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(task_id, reviewer_id, reviewee_id, review_type)
+);
+
+-- Platform Configuration Table
+CREATE TABLE platform_config (
+    id SERIAL PRIMARY KEY,
+    config_key VARCHAR(100) UNIQUE NOT NULL,
+    config_value JSONB NOT NULL,
+    description TEXT,
+    updated_by INT REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Task Templates (for common task types)
+CREATE TABLE task_templates (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    template_data JSONB, -- Store template structure
+    category_id INT REFERENCES categories(id),
+    created_by INT REFERENCES users(id),
+    is_public BOOLEAN DEFAULT TRUE,
+    usage_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Wallet Activity Logs (for tracking all wallet interactions)
+CREATE TABLE wallet_activities (
+    id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    activity_type VARCHAR(50), -- 'connect_wallet', 'disconnect_wallet', 'balance_check'
+    wallet_address VARCHAR(42),
+    metadata JSONB,
+    ip_address INET,
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Dispute Resolution Table
+CREATE TABLE disputes (
+    id SERIAL PRIMARY KEY,
+    task_id INT REFERENCES tasks(id) ON DELETE CASCADE,
+    submission_id INT REFERENCES task_submissions(id) ON DELETE CASCADE,
+    disputer_id INT REFERENCES users(id) ON DELETE CASCADE, -- Who raised the dispute
+    dispute_reason VARCHAR(100),
+    description TEXT,
+    evidence_urls TEXT[], -- Array of evidence links
+    status VARCHAR(20) CHECK (status IN ('open','investigating','resolved','closed')) DEFAULT 'open',
+    resolution_notes TEXT,
+    resolved_by INT REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP
+);
+
+-- Indexes for Performance
+CREATE INDEX idx_users_wallet_address ON users(wallet_address);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_role ON users(role);
+
+CREATE INDEX idx_tasks_creator_id ON tasks(creator_id);
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_tasks_created_at ON tasks(created_at);
+CREATE INDEX idx_tasks_deadline ON tasks(deadline);
+
+CREATE INDEX idx_submissions_task_id ON task_submissions(task_id);
+CREATE INDEX idx_submissions_worker_id ON task_submissions(worker_id);
+CREATE INDEX idx_submissions_status ON task_submissions(status);
+
+CREATE INDEX idx_transactions_user_id ON transactions(user_id);
+CREATE INDEX idx_transactions_txn_hash ON transactions(txn_hash);
+CREATE INDEX idx_transactions_status ON transactions(status);
+
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_notifications_is_read ON notifications(is_read);
+
+-- Functions for automatic updates
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Triggers for automatic timestamp updates
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_tasks_updated_at BEFORE UPDATE ON tasks
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_submissions_updated_at BEFORE UPDATE ON task_submissions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Sample data for development
+INSERT INTO categories (name, description, color_hex) VALUES
+    ('Data Entry', 'Simple data input and verification tasks', '#3B82F6'),
+    ('Content Creation', 'Writing, design, and media creation', '#10B981'),
+    ('Research', 'Information gathering and analysis', '#F59E0B'),
+    ('Testing', 'Software and product testing tasks', '#EF4444'),
+    ('Translation', 'Language translation and localization', '#8B5CF6');
+
+INSERT INTO skills (name, category_id) VALUES
+    ('Data Entry', 1),
+    ('Excel/Spreadsheets', 1),
+    ('Content Writing', 2),
+    ('Graphic Design', 2),
+    ('Web Research', 3),
+    ('Market Research', 3),
+    ('Quality Assurance', 4),
+    ('English', 5),
+    ('Spanish', 5);
+
+-- Platform configuration defaults
+INSERT INTO platform_config (config_key, config_value, description) VALUES
+    ('min_task_reward', '{"amount": 0.001, "currency": "AVAX"}', 'Minimum reward amount for tasks'),
+    ('platform_fee_percentage', '{"percentage": 5}', 'Platform fee as percentage of task reward'),
+    ('ai_verification_threshold', '{"score": 70}', 'Minimum AI score for auto-approval'),
+    ('max_submissions_per_task', '{"count": 3}', 'Maximum submissions allowed per task'),
+    ('withdrawal_minimum', '{"amount": 0.1, "currency": "AVAX"}', 'Minimum amount for withdrawal');
